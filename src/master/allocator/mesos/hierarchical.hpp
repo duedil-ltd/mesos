@@ -291,9 +291,8 @@ class RefusedFilter: public Filter
 public:
   RefusedFilter(
       const SlaveID& _slaveId,
-      const Resources& _resources,
-      const process::Timeout& _timeout)
-    : slaveId(_slaveId), resources(_resources), timeout(_timeout) {}
+      const Resources& _resources)
+    : slaveId(_slaveId), resources(_resources) {}
 
   virtual bool filter(const SlaveID& _slaveId, const Resources& _resources)
   {
@@ -303,13 +302,11 @@ public:
     // but currently the filter only expires if there is more of both
     // revocable and non-revocable resources.
     return slaveId == _slaveId &&
-           resources.contains(_resources) && // Refused resources are superset.
-           timeout.remaining() > Seconds(0);
+           resources.contains(_resources); // Refused resources are superset.
   }
 
   const SlaveID slaveId;
   const Resources resources;
-  const process::Timeout timeout;
 };
 
 
@@ -802,12 +799,21 @@ HierarchicalAllocatorProcess<RoleSorter, FrameworkSorter>::recoverResources(
     // Create a new filter and delay its expiration.
     Filter* filter = new RefusedFilter(
         slaveId,
-        resources,
-        process::Timeout::in(seconds.get()));
+        resources);
 
     frameworks[frameworkId].filters.insert(filter);
 
-    delay(seconds.get(), self(), &Self::expire, frameworkId, filter);
+    // delay(seconds.get(), self(), &Self::expire, frameworkId, filter);
+
+    // Expire the filter after both an `allocationInterval` and the
+    // `timeout` have elapsed. This ensures that the filter does not
+    // expire before we perform the next allocation for this agent,
+    // see MESOS-4302 for more information.
+    //
+    // TODO(alexr): If we allocated upon resource recovery
+    // (MESOS-3078), we would not need to increase the timeout here.
+    Duration timeout = std::max(allocationInterval, seconds.get());
+    delay(timeout, self(), &Self::expire, frameworkId, filter);
   }
 }
 
